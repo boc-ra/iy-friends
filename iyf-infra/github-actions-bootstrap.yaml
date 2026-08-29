@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: GitHub Actions OIDC federation and delivery roles for IY Friends
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    AllowedPattern: "[A-Za-z0-9_.-]+"
+    Description: GitHub account or organization name
+  GitHubOwnerId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: Immutable numeric GitHub account or organization ID
+  GitHubRepository:
+    Type: String
+    Default: iy-friends
+    AllowedPattern: "[A-Za-z0-9_.-]+"
+  GitHubRepositoryId:
+    Type: String
+    AllowedPattern: "[0-9]+"
+    Description: Immutable numeric GitHub repository ID
+  GitHubEnvironment:
+    Type: String
+    Default: production
+    AllowedPattern: "[A-Za-z0-9_.-]+"
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      Tags:
+        - { Key: Project, Value: iyf }
+        - { Key: Purpose, Value: github-actions-oidc }
+
+  DeploymentArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "iyf-github-artifacts-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDeploymentArtifacts
+            Status: Enabled
+            ExpirationInDays: 30
+            NoncurrentVersionExpiration: { NoncurrentDays: 7 }
+      Tags:
+        - { Key: Project, Value: iyf }
+        - { Key: Purpose, Value: sam-deployment-artifacts }
+
+  DeploymentArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DeploymentArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            # SECURITY-01 exception: s3:* is required on a Deny statement so every
+            # current and future bucket operation is rejected when TLS is absent.
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DeploymentArtifactBucket.Arn
+              - !Sub "${DeploymentArtifactBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  CloudFormationExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Provision only the AWS service families used by the two IY Friends application stacks
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Several create/list APIs below do not support resource-level scoping.
+          # The role trust is constrained to the two exact CloudFormation stack ARNs,
+          # while actions remain individually enumerated (SECURITY-06 exception).
+          - Sid: ProvisionApplicationResources
+            Effect: Allow
+            Action:
+              - apigateway:DELETE
+              - apigateway:GET
+              - apigateway:PATCH
+              - apigateway:POST
+              - apigateway:PUT
+              - cloudfront:CreateDistribution
+              - cloudfront:CreateOriginAccessControl
+              - cloudfront:CreateResponseHeadersPolicy
+              - cloudfront:DeleteDistribution
+              - cloudfront:DeleteOriginAccessControl
+              - cloudfront:DeleteResponseHeadersPolicy
+              - cloudfront:GetDistribution
+              - cloudfront:GetDistributionConfig
+              - cloudfront:GetOriginAccessControl
+              - cloudfront:GetOriginAccessControlConfig
+              - cloudfront:GetResponseHeadersPolicy
+              - cloudfront:GetResponseHeadersPolicyConfig
+              - cloudfront:ListTagsForResource
+              - cloudfront:TagResource
+              - cloudfront:UntagResource
+              - cloudfront:UpdateDistribution
+              - cloudfront:UpdateOriginAccessControl
+              - cloudfront:UpdateResponseHeadersPolicy
+              - cloudwatch:DeleteAlarms
+              - cloudwatch:DeleteDashboards
+              - cloudwatch:PutDashboard
+              - cloudwatch:PutMetricAlarm
+              - cognito-idp:CreateGroup
+              - cognito-idp:CreateUserPool
+              - cognito-idp:CreateUserPoolClient
+              - cognito-idp:DeleteGroup
+              - cognito-idp:DeleteUserPool
+              - cognito-idp:DeleteUserPoolClient
+              - cognito-idp:DescribeUserPool
+              - cognito-idp:DescribeUserPoolClient
+              - cognito-idp:GetGroup
+              - cognito-idp:TagResource
+              - cognito-idp:UntagResource
+              - cognito-idp:UpdateGroup
+              - cognito-idp:UpdateUserPool
+              - cognito-idp:UpdateUserPoolClient
+              - dynamodb:CreateTable
+              - dynamodb:DeleteTable
+              - dynamodb:DescribeContinuousBackups
+              - dynamodb:DescribeTable
+              - dynamodb:DescribeTimeToLive
+              - dynamodb:ListTagsOfResource
+              - dynamodb:TagResource
+              - dynamodb:UntagResource
+              - dynamodb:UpdateContinuousBackups
+              - dynamodb:UpdateTable
+              - iam:AttachRolePolicy
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:DeleteRolePolicy
+              - iam:DetachRolePolicy
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:PassRole
+              - iam:PutRolePolicy
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:UpdateAssumeRolePolicy
+              - lambda:AddPermission
+              - lambda:CreateFunction
+              - lambda:DeleteFunction
+              - lambda:GetFunction
+              - lambda:GetFunctionConfiguration
+              - lambda:ListTags
+              - lambda:PublishVersion
+              - lambda:RemovePermission
+              - lambda:TagResource
+              - lambda:UntagResource
+              - lambda:UpdateFunctionCode
+              - lambda:UpdateFunctionConfiguration
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:DescribeLogGroups
+              - logs:ListTagsForResource
+              - logs:PutRetentionPolicy
+              - logs:TagResource
+              - logs:UntagResource
+              - s3:CreateBucket
+              - s3:DeleteBucket
+              - s3:DeleteBucketPolicy
+              - s3:GetBucketLocation
+              - s3:GetEncryptionConfiguration
+              - s3:GetBucketPolicy
+              - s3:GetBucketTagging
+              - s3:GetBucketVersioning
+              - s3:ListBucket
+              - s3:PutBucketPolicy
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketTagging
+              - s3:PutBucketVersioning
+              - s3:PutEncryptionConfiguration
+              - sns:CreateTopic
+              - sns:DeleteTopic
+              - sns:GetSubscriptionAttributes
+              - sns:GetTopicAttributes
+              - sns:ListSubscriptionsByTopic
+              - sns:ListTagsForResource
+              - sns:SetSubscriptionAttributes
+              - sns:SetTopicAttributes
+              - sns:Subscribe
+              - sns:TagResource
+              - sns:Unsubscribe
+              - sns:UntagResource
+            Resource: "*"
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: iyf-cloudformation-execution-prod
+      Description: CloudFormation execution role restricted to the IY Friends production stacks
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: cloudformation.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+              ArnLike:
+                "aws:SourceArn":
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/iyf-infra-shared-prod/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/iyf-backend-api-prod/*"
+      ManagedPolicyArns:
+        - !Ref CloudFormationExecutionPolicy
+      MaxSessionDuration: 3600
+      Tags:
+        - { Key: Project, Value: iyf }
+        - { Key: Environment, Value: production }
+
+  GitHubDeploymentPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Package and deploy the exact IY Friends production stacks and public web
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ManageApplicationStacks
+            Effect: Allow
+            Action:
+              - cloudformation:CreateChangeSet
+              - cloudformation:DeleteChangeSet
+              - cloudformation:DescribeChangeSet
+              - cloudformation:DescribeStackEvents
+              - cloudformation:DescribeStackResource
+              - cloudformation:DescribeStacks
+              - cloudformation:ExecuteChangeSet
+              - cloudformation:GetTemplateSummary
+            Resource:
+              - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/iyf-infra-shared-prod/*"
+              - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/iyf-backend-api-prod/*"
+              - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31"
+          - Sid: PassExactExecutionRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt CloudFormationExecutionRole.Arn
+            Condition:
+              StringEquals:
+                "iam:PassedToService": cloudformation.amazonaws.com
+          - Sid: ReadArtifactBucket
+            Effect: Allow
+            Action:
+              - s3:GetBucketLocation
+              - s3:ListBucket
+            Resource: !GetAtt DeploymentArtifactBucket.Arn
+          - Sid: ManageDeploymentArtifacts
+            Effect: Allow
+            Action:
+              - s3:DeleteObject
+              - s3:GetObject
+              - s3:PutObject
+            Resource: !Sub "${DeploymentArtifactBucket.Arn}/*"
+          - Sid: ReadPublicWebBucket
+            Effect: Allow
+            Action:
+              - s3:GetBucketLocation
+              - s3:ListBucket
+            Resource: !Sub "arn:${AWS::Partition}:s3:::iyf-prod-web-${AWS::AccountId}"
+          - Sid: PublishPublicWeb
+            Effect: Allow
+            Action:
+              - s3:DeleteObject
+              - s3:GetObject
+              - s3:PutObject
+            Resource: !Sub "arn:${AWS::Partition}:s3:::iyf-prod-web-${AWS::AccountId}/*"
+          - Sid: InvalidateProjectDistribution
+            Effect: Allow
+            Action: cloudfront:CreateInvalidation
+            # Distribution IDs are generated by CloudFormation. The workflow resolves
+            # the exact Distribution logical resource from the fixed infra stack.
+            Resource: !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/*"
+
+  GitHubDeploymentRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: iyf-github-deploy-prod
+      Description: Short-lived GitHub Actions role for approved production Environment jobs
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                "token.actions.githubusercontent.com:sub": !Sub >-
+                  repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:${GitHubEnvironment}
+      ManagedPolicyArns:
+        - !Ref GitHubDeploymentPolicy
+      MaxSessionDuration: 3600
+      Tags:
+        - { Key: Project, Value: iyf }
+        - { Key: Environment, Value: production }
+
+Outputs:
+  AwsAccountId:
+    Value: !Ref AWS::AccountId
+  GitHubDeploymentRoleArn:
+    Value: !GetAtt GitHubDeploymentRole.Arn
+  CloudFormationExecutionRoleArn:
+    Value: !GetAtt CloudFormationExecutionRole.Arn
+  DeploymentArtifactBucketName:
+    Value: !Ref DeploymentArtifactBucket
+  TrustedOidcSubject:
+    Value: !Sub >-
+      repo:${GitHubOwner}@${GitHubOwnerId}/${GitHubRepository}@${GitHubRepositoryId}:environment:${GitHubEnvironment}

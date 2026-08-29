@@ -1,0 +1,188 @@
+name: Production deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Production component to select
+        required: true
+        type: choice
+        default: all
+        options:
+          - infra
+          - backend
+          - public-web
+          - all
+      deploy:
+        description: Keep false to verify OIDC only; set true to deploy the selected target
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: iyf-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Verify or deploy ${{ inputs.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out approved revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node.js for target validation
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.18.0"
+          package-manager-cache: false
+      - name: Select deployment target
+        id: selection
+        run: node scripts/deployment-target.mjs "${{ inputs.target }}"
+      - name: Validate required Environment variables
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          test -n "$AWS_DEPLOY_ROLE_ARN"
+          test -n "$AWS_ACCOUNT_ID"
+      - name: Configure short-lived AWS credentials
+        uses: aws-actions/configure-aws-credentials@451ce2a72e8d729a59ebeaacab82dbce58e7af4c # v6
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: iyf-production-${{ github.run_id }}
+          aws-region: ap-northeast-1
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+          role-duration-seconds: 3600
+          unset-current-credentials: true
+      - name: Verify OIDC role assumption
+        run: aws sts get-caller-identity --query Arn --output text
+      - name: Report verification-only run
+        if: ${{ !inputs.deploy }}
+        run: echo "OIDC verification succeeded; no application resource was changed."
+      - name: Validate deployment support variables
+        if: ${{ inputs.deploy }}
+        env:
+          AWS_CFN_EXECUTION_ROLE_ARN: ${{ vars.AWS_CFN_EXECUTION_ROLE_ARN }}
+          AWS_SAM_ARTIFACT_BUCKET: ${{ vars.AWS_SAM_ARTIFACT_BUCKET }}
+        run: |
+          test -n "$AWS_CFN_EXECUTION_ROLE_ARN"
+          test -n "$AWS_SAM_ARTIFACT_BUCKET"
+      - name: Set up AWS SAM CLI
+        if: >-
+          ${{ inputs.deploy &&
+          (steps.selection.outputs.deploy_infra == 'true' ||
+          steps.selection.outputs.deploy_backend == 'true') }}
+        uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
+        with:
+          version: "1.163.0"
+          use-installer: true
+      - name: Build shared infrastructure
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_infra == 'true' }}
+        working-directory: iyf-infra
+        run: sam build --template-file template.yaml
+      - name: Deploy shared infrastructure
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_infra == 'true' }}
+        working-directory: iyf-infra
+        env:
+          AWS_CFN_EXECUTION_ROLE_ARN: ${{ vars.AWS_CFN_EXECUTION_ROLE_ARN }}
+          AWS_SAM_ARTIFACT_BUCKET: ${{ vars.AWS_SAM_ARTIFACT_BUCKET }}
+        run: >-
+          sam deploy
+          --template-file .aws-sam/build/template.yaml
+          --stack-name iyf-infra-shared-prod
+          --s3-bucket "$AWS_SAM_ARTIFACT_BUCKET"
+          --capabilities CAPABILITY_IAM
+          --parameter-overrides Stage=prod
+          --role-arn "$AWS_CFN_EXECUTION_ROLE_ARN"
+          --region ap-northeast-1
+          --no-confirm-changeset
+          --no-fail-on-empty-changeset
+      - name: Resolve CloudFront domain for backend CORS
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_backend == 'true' }}
+        id: infra-values
+        run: |
+          value="$(aws cloudformation describe-stacks \
+            --stack-name iyf-infra-shared-prod \
+            --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomain'].OutputValue | [0]" \
+            --output text)"
+          test -n "$value"
+          test "$value" != "None"
+          echo "cloudfront_domain=$value" >> "$GITHUB_OUTPUT"
+      - name: Build backend
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_backend == 'true' }}
+        working-directory: iyf-backend-api
+        run: sam build --template-file template.yaml
+      - name: Deploy backend
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_backend == 'true' }}
+        working-directory: iyf-backend-api
+        env:
+          AWS_CFN_EXECUTION_ROLE_ARN: ${{ vars.AWS_CFN_EXECUTION_ROLE_ARN }}
+          AWS_SAM_ARTIFACT_BUCKET: ${{ vars.AWS_SAM_ARTIFACT_BUCKET }}
+          CLOUDFRONT_DOMAIN: ${{ steps.infra-values.outputs.cloudfront_domain }}
+        run: >-
+          sam deploy
+          --template-file .aws-sam/build/template.yaml
+          --stack-name iyf-backend-api-prod
+          --s3-bucket "$AWS_SAM_ARTIFACT_BUCKET"
+          --capabilities CAPABILITY_IAM
+          --parameter-overrides
+          Stage=prod
+          "AllowedOrigins=https://$CLOUDFRONT_DOMAIN,http://localhost:5174"
+          --role-arn "$AWS_CFN_EXECUTION_ROLE_ARN"
+          --region ap-northeast-1
+          --no-confirm-changeset
+          --no-fail-on-empty-changeset
+      - name: Resolve public web deployment values
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_public_web == 'true' }}
+        id: public-values
+        run: |
+          web_bucket="$(aws cloudformation describe-stacks \
+            --stack-name iyf-infra-shared-prod \
+            --query "Stacks[0].Outputs[?OutputKey=='WebBucketName'].OutputValue | [0]" \
+            --output text)"
+          distribution_id="$(aws cloudformation describe-stack-resource \
+            --stack-name iyf-infra-shared-prod \
+            --logical-resource-id Distribution \
+            --query StackResourceDetail.PhysicalResourceId \
+            --output text)"
+          api_base_url="$(aws cloudformation describe-stacks \
+            --stack-name iyf-backend-api-prod \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue | [0]" \
+            --output text)"
+          for value in "$web_bucket" "$distribution_id" "$api_base_url"; do
+            test -n "$value"
+            test "$value" != "None"
+          done
+          echo "web_bucket=$web_bucket" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$distribution_id" >> "$GITHUB_OUTPUT"
+          echo "api_base_url=$api_base_url" >> "$GITHUB_OUTPUT"
+      - name: Install locked public web dependencies
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_public_web == 'true' }}
+        working-directory: iyf-public-web
+        run: |
+          npm install --global npm@11.16.0
+          npm ci
+      - name: Build public web
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_public_web == 'true' }}
+        working-directory: iyf-public-web
+        env:
+          VITE_API_BASE_URL: ${{ steps.public-values.outputs.api_base_url }}
+        run: npm run build
+      - name: Publish public web
+        if: ${{ inputs.deploy && steps.selection.outputs.deploy_public_web == 'true' }}
+        working-directory: iyf-public-web
+        env:
+          WEB_BUCKET: ${{ steps.public-values.outputs.web_bucket }}
+          DISTRIBUTION_ID: ${{ steps.public-values.outputs.distribution_id }}
+        run: |
+          aws s3 sync dist/ "s3://$WEB_BUCKET/" --delete --only-show-errors
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths "/*"

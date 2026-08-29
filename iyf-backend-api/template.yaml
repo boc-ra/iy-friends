@@ -1,0 +1,301 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  IY Friends backend API (U3, Phase 1) — modular monolith on Lambda.
+  Public read APIs (content/calendar) + contact submission. Low-cost serverless.
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedValues: [prod, dev]
+  AllowedOrigins:
+    Type: String
+    Default: ""
+    Description: "CORS 許可オリジン（カンマ区切り。SECURITY-08 ワイルドカード不可）"
+
+Globals:
+  Function:
+    Runtime: python3.13
+    MemorySize: 256
+    Timeout: 10
+    Architectures: [arm64]   # 低コスト（Graviton）
+    Environment:
+      Variables:
+        STAGE: !Ref Stage
+        TABLE_POSTS: !Ref PostsTable
+        TABLE_NOTICES: !Ref NoticesTable
+        TABLE_EVENTS: !Ref EventsTable
+        TABLE_INQUIRIES: !Ref InquiriesTable
+        TABLE_USERS: !Ref UsersTable
+        ALLOWED_ORIGINS: !Ref AllowedOrigins
+        SSM_PREFIX: !Sub "/iyf/${Stage}"
+        PAGE_SIZE: "10"
+
+Resources:
+  # ---- HTTP API（スロットリング・アクセスログ, SECURITY-02/11） ----
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref Stage
+      # CORS は API Gateway で処理。SAM は認証付き HTTP API を OpenAPI 化するため、
+      # AllowOrigins はビルド時に解決できる「リテラル」で指定する（!Split/!Ref だと欠落する）。
+      CorsConfiguration:
+        AllowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+        AllowHeaders: [content-type, authorization]
+        AllowOrigins:
+          - "http://localhost:5174"
+          - "https://d2oybetesfen6b.cloudfront.net"
+      # 管理系ルートにのみ適用する Cognito JWT オーソライザ（Phase 2, SECURITY-08/12）。
+      # 公開ルートは無認可のまま（DefaultAuthorizer は設定しない）。
+      Auth:
+        Authorizers:
+          CognitoJwt:
+            IdentitySource: "$request.header.Authorization"
+            JwtConfiguration:
+              issuer: !Sub
+                - "https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}"
+                - UserPoolId:
+                    Fn::ImportValue: !Sub "iyf-${Stage}-UserPoolId"
+              audience:
+                - Fn::ImportValue: !Sub "iyf-${Stage}-UserPoolClientId"
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp","route":"$context.routeKey","status":"$context.status","protocol":"$context.protocol","responseLatency":"$context.responseLatency"}
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/iyf/${Stage}/api-access"
+      RetentionInDays: 90     # SECURITY-14: ログ保持90日以上
+
+  # ---- 公開ハンドラ（最小権限は各テーブルの Policy で付与） ----
+  PublicFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: src.handlers.public.handler
+      Description: Public read APIs + contact submission (Phase 1)
+      Policies:
+        # 読み取り: content/calendar（Query/GetItem のみ）。
+        - DynamoDBReadPolicy: { TableName: !Ref PostsTable }
+        - DynamoDBReadPolicy: { TableName: !Ref NoticesTable }
+        - DynamoDBReadPolicy: { TableName: !Ref EventsTable }
+        # 書き込み+読み取り: contact（問い合わせ保存・冪等参照・notified更新）。
+        - DynamoDBCrudPolicy: { TableName: !Ref InquiriesTable }
+        # SSM SecureString 読み取り（当該プレフィックスのみ, SECURITY-06）。
+        - Statement:
+            - Effect: Allow
+              Action: [ssm:GetParameter]
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/iyf/${Stage}/*"
+        # SES 送信（問い合わせ通知）。
+        - Statement:
+            - Effect: Allow
+              Action: [ses:SendEmail]
+              Resource: "*"   # SES は送信元/宛先条件で絞る（Condition は Infra 詳細で付与）
+      Events:
+        ListPosts:      { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,  Path: "/posts" } }
+        GetPost:        { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,  Path: "/posts/{id}" } }
+        ListNotices:    { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,  Path: "/notices" } }
+        GetNotice:      { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,  Path: "/notices/{id}" } }
+        ListEvents:     { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,  Path: "/events" } }
+        GetEvent:       { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,  Path: "/events/{id}" } }
+        SubmitContact:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: POST, Path: "/contact" } }
+
+  # ---- 管理ハンドラ（認証必須, Phase 2, SECURITY-06/08） ----
+  AdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: src.handlers.admin.handler
+      Description: Admin APIs (Phase 2) — content/calendar/contact admin + auth/users
+      Environment:
+        Variables:
+          USER_POOL_ID:
+            Fn::ImportValue: !Sub "iyf-${Stage}-UserPoolId"
+      Policies:
+        # DynamoDB: 管理系は各テーブルの CRUD（新 GSI Query 含む）。
+        - DynamoDBCrudPolicy: { TableName: !Ref PostsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref NoticesTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref EventsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref InquiriesTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref UsersTable }
+        # Cognito 管理操作（UserPool ARN 限定, ワイルドカード禁止, SECURITY-06）。
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:AdminDisableUser
+                - cognito-idp:AdminEnableUser
+                - cognito-idp:AdminGetUser
+                - cognito-idp:ListUsers
+              Resource: !Sub
+                - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+                - UserPoolId:
+                    Fn::ImportValue: !Sub "iyf-${Stage}-UserPoolId"
+        # SSM SecureString（当該プレフィックスのみ）。
+        - Statement:
+            - Effect: Allow
+              Action: [ssm:GetParameter]
+              Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/iyf/${Stage}/*"
+      Events:
+        # ブログ
+        CreatePost:      { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: POST,   Path: "/admin/posts",             Auth: { Authorizer: CognitoJwt } } }
+        ListPostsAdmin:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/posts",             Auth: { Authorizer: CognitoJwt } } }
+        GetPostAdmin:    { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/posts/{id}",        Auth: { Authorizer: CognitoJwt } } }
+        UpdatePost:      { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/posts/{id}",        Auth: { Authorizer: CognitoJwt } } }
+        DeletePost:      { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: DELETE, Path: "/admin/posts/{id}",        Auth: { Authorizer: CognitoJwt } } }
+        SetPostStatus:   { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/posts/{id}/status", Auth: { Authorizer: CognitoJwt } } }
+        # お知らせ
+        CreateNotice:    { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: POST,   Path: "/admin/notices",             Auth: { Authorizer: CognitoJwt } } }
+        ListNoticesAdmin: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/notices",             Auth: { Authorizer: CognitoJwt } } }
+        GetNoticeAdmin:  { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/notices/{id}",        Auth: { Authorizer: CognitoJwt } } }
+        UpdateNotice:    { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/notices/{id}",        Auth: { Authorizer: CognitoJwt } } }
+        DeleteNotice:    { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: DELETE, Path: "/admin/notices/{id}",        Auth: { Authorizer: CognitoJwt } } }
+        SetNoticeStatus: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/notices/{id}/status", Auth: { Authorizer: CognitoJwt } } }
+        # カレンダー
+        CreateEvent:     { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: POST,   Path: "/admin/events",        Auth: { Authorizer: CognitoJwt } } }
+        ListEventsAdmin: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/events",        Auth: { Authorizer: CognitoJwt } } }
+        UpdateEvent:     { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/events/{id}",   Auth: { Authorizer: CognitoJwt } } }
+        DeleteEvent:     { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: DELETE, Path: "/admin/events/{id}",   Auth: { Authorizer: CognitoJwt } } }
+        # 問い合わせ（Admin）
+        ListInquiries:   { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/inquiries",             Auth: { Authorizer: CognitoJwt } } }
+        GetInquiry:      { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/inquiries/{id}",        Auth: { Authorizer: CognitoJwt } } }
+        UpdateInquiry:   { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/inquiries/{id}/status", Auth: { Authorizer: CognitoJwt } } }
+        # ユーザー / 自プロフィール
+        InviteEditor:    { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: POST,   Path: "/admin/users/invite",     Auth: { Authorizer: CognitoJwt } } }
+        ListUsers:       { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: GET,    Path: "/admin/users",            Auth: { Authorizer: CognitoJwt } } }
+        SetUserStatus:   { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/users/{id}/status",Auth: { Authorizer: CognitoJwt } } }
+        CompleteProfile: { Type: HttpApi, Properties: { ApiId: !Ref HttpApi, Method: PUT,    Path: "/admin/me/profile",       Auth: { Authorizer: CognitoJwt } } }
+
+  # ---- DynamoDB（マルチテーブル, On-Demand, PITR, 保存時暗号化） ----
+  PostsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "iyf-${Stage}-Posts"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+      AttributeDefinitions:
+        - { AttributeName: post_id, AttributeType: S }
+        - { AttributeName: gsi_status, AttributeType: S }
+        - { AttributeName: published_at_epoch, AttributeType: N }
+        - { AttributeName: status, AttributeType: S }
+        - { AttributeName: updated_at_epoch, AttributeType: N }
+      KeySchema:
+        - { AttributeName: post_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI-published
+          KeySchema:
+            - { AttributeName: gsi_status, KeyType: HASH }
+            - { AttributeName: published_at_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        # 管理系一覧（draft 含む, Phase2）。status は常時設定。
+        - IndexName: GSI-status
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: updated_at_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  NoticesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "iyf-${Stage}-Notices"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+      AttributeDefinitions:
+        - { AttributeName: notice_id, AttributeType: S }
+        - { AttributeName: gsi_status, AttributeType: S }
+        - { AttributeName: published_at_epoch, AttributeType: N }
+        - { AttributeName: status, AttributeType: S }
+        - { AttributeName: updated_at_epoch, AttributeType: N }
+      KeySchema:
+        - { AttributeName: notice_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI-published
+          KeySchema:
+            - { AttributeName: gsi_status, KeyType: HASH }
+            - { AttributeName: published_at_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        - IndexName: GSI-status
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: updated_at_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "iyf-${Stage}-Events"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+      AttributeDefinitions:
+        - { AttributeName: event_id, AttributeType: S }
+        - { AttributeName: gsi_status, AttributeType: S }
+        - { AttributeName: event_date_epoch, AttributeType: N }
+        - { AttributeName: status, AttributeType: S }
+      KeySchema:
+        - { AttributeName: event_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI-date
+          KeySchema:
+            - { AttributeName: gsi_status, KeyType: HASH }
+            - { AttributeName: event_date_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+        # 管理系一覧（draft 含む, Phase2）。SK は event_date_epoch（日付順）。
+        - IndexName: GSI-status
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: event_date_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  InquiriesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "iyf-${Stage}-Inquiries"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+      AttributeDefinitions:
+        - { AttributeName: inquiry_id, AttributeType: S }
+        - { AttributeName: dedup_key, AttributeType: S }
+        - { AttributeName: created_at_epoch, AttributeType: N }
+        - { AttributeName: status, AttributeType: S }
+      KeySchema:
+        - { AttributeName: inquiry_id, KeyType: HASH }
+      GlobalSecondaryIndexes:
+        - IndexName: GSI-dedup
+          KeySchema:
+            - { AttributeName: dedup_key, KeyType: HASH }
+            - { AttributeName: created_at_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: KEYS_ONLY }
+        # 管理系一覧（対応状況で絞り込み, Phase2）。status は常時設定・created_at_epoch も既存。
+        - IndexName: GSI-status
+          KeySchema:
+            - { AttributeName: status, KeyType: HASH }
+            - { AttributeName: created_at_epoch, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "iyf-${Stage}-Users"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      SSESpecification: { SSEEnabled: true }
+      AttributeDefinitions:
+        - { AttributeName: user_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: user_id, KeyType: HASH }
+
+Outputs:
+  ApiBaseUrl:
+    Description: 公開APIのベースURL
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"

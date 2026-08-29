@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-policy:
+    name: Repository policy and delivery tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.18.0"
+          package-manager-cache: false
+      - name: Test repository policy and delivery selection
+        run: >-
+          node --test
+          tools/repo-policy.test.mjs
+          .codex/hooks/tool-policy.test.mjs
+          scripts/deployment-target.test.mjs
+      - name: Check tracked public files
+        run: node tools/repo-policy.mjs --tracked
+      - name: Validate delivery invariants
+        run: node scripts/validate-delivery.mjs
+
+  frontend:
+    name: ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Public web
+            path: iyf-public-web
+          - label: Admin web (validation only)
+            path: iyf-admin-web
+    defaults:
+      run:
+        working-directory: ${{ matrix.path }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24.18.0"
+          cache: npm
+          cache-dependency-path: ${{ matrix.path }}/package-lock.json
+          package-manager-cache: false
+      - name: Pin npm
+        run: npm install --global npm@11.16.0
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p ../reports
+          npm sbom --sbom-format cyclonedx > "../reports/${{ matrix.path }}-sbom.json"
+      - name: Upload SBOM
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: sbom-${{ matrix.path }}
+          path: reports/${{ matrix.path }}-sbom.json
+          if-no-files-found: error
+          retention-days: 7
+
+  backend:
+    name: Backend tests, audit, and SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        working-directory: iyf-backend-api
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13.15"
+          cache: pip
+          cache-dependency-path: |
+            iyf-backend-api/pyproject.toml
+            iyf-backend-api/requirements.txt
+      - name: Install pinned dependencies and security tools
+        run: python -m pip install -e ".[dev]" pip-audit==2.10.1 cyclonedx-bom==7.3.1
+      - name: Unit tests including Hypothesis properties
+        run: python -m pytest -q
+      - name: Audit production dependencies
+        run: python -m pip_audit --requirement requirements.txt
+      - name: Generate CycloneDX SBOM
+        run: |
+          mkdir -p ../reports
+          cyclonedx-py requirements requirements.txt --output-file ../reports/backend-sbom.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: sbom-backend
+          path: reports/backend-sbom.json
+          if-no-files-found: error
+          retention-days: 7
+
+  sam-lint:
+    name: SAM template lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Set up AWS SAM CLI
+        uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
+        with:
+          version: "1.163.0"
+          use-installer: true
+      - name: Lint backend template
+        run: sam validate --lint --template-file iyf-backend-api/template.yaml
+      - name: Lint shared infrastructure template
+        run: sam validate --lint --template-file iyf-infra/template.yaml
+      - name: Lint GitHub OIDC bootstrap template
+        run: sam validate --lint --template-file iyf-infra/github-actions-bootstrap.yaml

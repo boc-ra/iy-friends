@@ -1,0 +1,33 @@
+# 移行設定サンプル。実行前に config.toml としてコピーし、現行サイトに合わせて記入する。
+# （実サイトのHTML構造に合わせて CSS セレクタを調整）
+
+[source]
+# 記事一覧ページのURL（ページングがあれば {page} を含める）
+list_url = "https://example.com/blog?page={page}"
+# 一覧をたどる最大ページ数
+max_pages = 40
+# リクエスト間隔（秒）。現行サイトへの礼儀・負荷配慮。
+request_delay_seconds = 1.0
+user_agent = "iyf-blog-migration/1.0 (+contact: admin@example.com)"
+
+[selectors]
+# 一覧ページ内の各記事へのリンク（href を収集）
+list_item_link = "article h2 a"
+# 記事詳細ページ内の各要素
+title = "h1.entry-title"
+body = "div.entry-content"
+date = "time.published"          # datetime 属性 or テキスト
+author = "span.author"           # 無ければ空でよい（既定の表示名を使用）
+
+[normalize]
+default_author = "IYフレンズ"
+# 本文から画像(img)を除外する（Q14: 写真は当面除外）
+exclude_images = true
+
+[import]
+# 投入時の公開状態（Q-M4=A: published）
+publish_status = "published"
+# AWS プロファイル/リージョン（ローカル実行, Q-M3=A）
+aws_region = "ap-northeast-1"
+# テーブル名は環境変数 TABLE_POSTS でも上書き可
+table_posts = "iyf-prod-Posts"

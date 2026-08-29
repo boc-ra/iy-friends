@@ -1,0 +1,43 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+credentials
+credentials.*
+*.pem
+*.p12
+*.key
+id_rsa
+id_ed25519
+
+# Dependencies and build outputs
+node_modules/
+dist/
+.aws-sam/
+*.tsbuildinfo
+*.zip
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.hypothesis/
+coverage/
+.coverage
+htmlcov/
+
+# Tool and OS state
+.DS_Store
+Thumbs.db
+*.local
+.claude/settings.local.json
+.codex/local/
+.tmp/
+
+# AI-DLC operational history can include local identifiers and raw prompts.
+aidlc-docs/audit.md
+
+# Generated security/build reports
+sbom*.json
+reports/

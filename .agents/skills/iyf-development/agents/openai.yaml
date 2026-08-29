@@ -1,0 +1,6 @@
+interface:
+  display_name: "IY Friends Development"
+  short_description: "Develop and deploy the IY Friends monorepo safely"
+  default_prompt: "Use $iyf-development to make and verify a safe change in this monorepo."
+policy:
+  allow_implicit_invocation: true

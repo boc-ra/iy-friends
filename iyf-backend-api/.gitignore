@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.hypothesis/
+.aws-sam/
+.venv/
+venv/
+*.egg-info/
+.env
+.DS_Store

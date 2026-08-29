@@ -1,0 +1,110 @@
+@import "./tokens.css";
+
+/* リセット（最小） */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body, h1, h2, h3, h4, p, figure, blockquote, ul, ol { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+img { max-width: 100%; display: block; }
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+
+/* タイポグラフィ — システムフォント優先（光学サイズ/トラッキングを内蔵） */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", "Segoe UI", system-ui, sans-serif;
+  font-size: 100%;
+  line-height: 1.6;                 /* 本文は緩めのleading */
+  color: var(--c-text);
+  background: var(--c-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 見出しは大きいほどtrackingを詰め、leadingを締める */
+h1, .display {
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+h2 {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  font-weight: 650;
+}
+h3 { font-size: 1.15rem; line-height: 1.3; letter-spacing: -0.005em; font-weight: 650; }
+
+a { text-decoration: none; }
+a:hover { color: var(--c-brand-ink); }
+
+:focus-visible {
+  outline: 2px solid var(--c-brand);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* sticky footer: 画面が余っても footer を最下部に張り付ける */
+#root { min-height: 100dvh; display: flex; flex-direction: column; }
+#root > main { flex: 1 0 auto; }
+
+/* レイアウトユーティリティ */
+.container { width: 100%; max-width: var(--content-max); margin: 0 auto; padding: 0 var(--sp-4); }
+.narrow { max-width: var(--content-narrow); }
+.stack > * + * { margin-top: var(--sp-4); }
+.muted { color: var(--c-text-muted); }
+
+/* ボタン — 押下(pointer-down)で即時フィードバック（scale） */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  padding: 0.7rem 1.25rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--c-brand); color: #fff;
+  font-weight: 600; cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-standard),
+              background var(--dur-fast) var(--ease-standard),
+              box-shadow var(--dur-fast) var(--ease-standard);
+  box-shadow: var(--shadow-sm);
+}
+.btn:hover { background: var(--c-brand-ink); color: #fff; }
+.btn:active { transform: scale(0.97); }
+.btn.secondary {
+  background: transparent; color: var(--c-text);
+  border-color: var(--c-border);
+}
+.btn.secondary:hover { background: var(--c-surface); color: var(--c-text); }
+
+/* カード — 面が大きいほど厚い影。hoverでわずかに浮く（抑制） */
+.card {
+  background: var(--c-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--dur) var(--ease-standard),
+              box-shadow var(--dur) var(--ease-standard);
+}
+.card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+
+/* 入場アニメ（抑制・短い） */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.fade-in { animation: fade-in var(--dur) var(--ease-standard) both; }
+
+/* Reduced motion: スライド/スプリングを排し、静的/クロスフェードに */
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; }
+  .card, .btn { transition: none; }
+  .card:hover { transform: none; }
+  .btn:active { transform: none; }
+  .fade-in { animation: none; }
+}
+
+/* コントラスト強調 */
+@media (prefers-contrast: more) {
+  :root { --c-border: rgba(0,0,0,0.4); }
+  .btn.secondary { border-color: var(--c-text); }
+}

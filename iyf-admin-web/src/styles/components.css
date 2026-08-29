@@ -1,0 +1,152 @@
+/* 管理UI コンポーネント — apple-design 基調・スマホ最適化。tokens.css を利用。 */
+
+/* ---- アプリ枠（TopBar + Drawer + main） ---- */
+.app-shell { min-height: 100dvh; display: flex; flex-direction: column; background: var(--c-surface); }
+
+.topbar {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  backdrop-filter: saturate(180%) blur(16px);
+  border-bottom: 1px solid var(--c-border);
+}
+.topbar .brand { font-weight: 700; letter-spacing: -0.01em; }
+.topbar .spacer { flex: 1; }
+.topbar .user { color: var(--c-text-muted); font-size: 0.9rem; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 44px; height: 44px; border-radius: 12px;
+  background: transparent; border: 1px solid var(--c-border); cursor: pointer;
+}
+.icon-btn:active { transform: scale(0.96); }
+
+.layout { flex: 1; display: flex; }
+.main { flex: 1; min-width: 0; padding: var(--sp-6) var(--sp-4) var(--sp-16); }
+.main .container { max-width: 60rem; }
+
+/* ---- Drawer（サイドナビ / モバイルはオーバーレイ） ---- */
+.drawer {
+  width: 240px; flex-shrink: 0;
+  background: var(--c-bg); border-right: 1px solid var(--c-border);
+  padding: var(--sp-4);
+}
+.drawer nav { display: flex; flex-direction: column; gap: var(--sp-1); }
+.drawer a {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 0.7rem 0.85rem; border-radius: 12px; color: var(--c-text);
+  min-height: 44px; font-weight: 550;
+}
+.drawer a.active { background: var(--c-surface); color: var(--c-brand-ink); }
+.drawer a:hover { background: var(--c-surface); }
+
+.drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.35); z-index: 40; }
+.drawer.mobile {
+  position: fixed; inset: 0 auto 0 0; z-index: 50; box-shadow: var(--shadow-lg);
+  animation: drawer-in var(--dur) var(--ease-standard) both;
+}
+@keyframes drawer-in { from { transform: translateX(-100%); } to { transform: none; } }
+
+@media (min-width: 860px) {
+  .drawer-backdrop, .icon-btn.menu { display: none; }
+}
+@media (max-width: 859px) {
+  .drawer.static { display: none; }
+}
+
+/* ---- フォーム ---- */
+.field { display: flex; flex-direction: column; gap: var(--sp-2); }
+.field label { font-weight: 600; font-size: 0.92rem; }
+.input, .textarea, .select {
+  width: 100%; padding: 0.7rem 0.85rem; min-height: 44px;
+  border: 1px solid var(--c-border); border-radius: 12px;
+  background: var(--c-bg); color: var(--c-text); font: inherit;
+}
+.textarea { min-height: 8rem; resize: vertical; }
+.field .hint { color: var(--c-text-muted); font-size: 0.82rem; }
+.field .err { color: var(--c-danger); font-size: 0.85rem; }
+
+.form-actions {
+  display: flex; gap: var(--sp-3); flex-wrap: wrap;
+  position: sticky; bottom: 0; padding: var(--sp-3) 0;
+  background: linear-gradient(to top, var(--c-surface), transparent);
+}
+
+/* ---- リスト/テーブル（モバイルはカード化） ---- */
+.list { display: flex; flex-direction: column; gap: var(--sp-3); }
+.row-card {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: var(--sp-4); background: var(--c-bg);
+  border: 1px solid var(--c-border); border-radius: var(--radius);
+}
+.row-card .grow { flex: 1; min-width: 0; }
+.row-card .title { font-weight: 650; }
+.row-card .sub { color: var(--c-text-muted); font-size: 0.85rem; }
+
+/* ---- バッジ ---- */
+.badge {
+  display: inline-flex; align-items: center; padding: 0.15rem 0.6rem;
+  border-radius: 999px; font-size: 0.78rem; font-weight: 650;
+  border: 1px solid var(--c-border);
+}
+.badge.draft { background: var(--c-surface); color: var(--c-text-muted); }
+.badge.published { background: rgba(46,160,90,0.14); color: #2e8b57; border-color: transparent; }
+.badge.new { background: rgba(232,117,43,0.14); color: var(--c-brand-ink); border-color: transparent; }
+.badge.in_progress { background: rgba(244,169,53,0.18); color: #9a6a00; border-color: transparent; }
+.badge.done { background: var(--c-surface); color: var(--c-text-muted); }
+
+/* ---- Modal / Toast ---- */
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 60;
+  display: flex; align-items: center; justify-content: center; padding: var(--sp-4); }
+.modal {
+  width: 100%; max-width: 28rem; background: var(--c-bg);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: var(--sp-6);
+  animation: fade-in var(--dur) var(--ease-standard) both;
+}
+.toast-wrap { position: fixed; left: 0; right: 0; bottom: var(--sp-6); z-index: 80;
+  display: flex; justify-content: center; pointer-events: none; }
+.toast {
+  pointer-events: auto; background: var(--c-text); color: var(--c-bg);
+  padding: 0.7rem 1.1rem; border-radius: 999px; box-shadow: var(--shadow);
+  animation: fade-in var(--dur) var(--ease-standard) both;
+}
+.toast.error { background: var(--c-danger); color: #fff; }
+
+/* ---- ログイン ---- */
+.auth-wrap { min-height: 100dvh; display: grid; place-items: center; padding: var(--sp-4); background: var(--c-surface); }
+.auth-card { width: 100%; max-width: 24rem; background: var(--c-bg);
+  border: 1px solid var(--c-border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow); padding: var(--sp-8); }
+
+/* ---- TipTap エディタ ---- */
+.editor { border: 1px solid var(--c-border); border-radius: 12px; overflow: hidden; background: var(--c-bg); }
+.editor .toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: var(--sp-2);
+  border-bottom: 1px solid var(--c-border); background: var(--c-surface); }
+.editor .toolbar button {
+  min-width: 38px; height: 38px; border-radius: 8px; border: 1px solid transparent;
+  background: transparent; cursor: pointer; font-weight: 650;
+}
+.editor .toolbar button.on { background: var(--c-bg); border-color: var(--c-border); color: var(--c-brand-ink); }
+.editor .ProseMirror { padding: var(--sp-4); min-height: 12rem; outline: none; }
+.editor .ProseMirror:focus { outline: none; }
+.editor .ProseMirror p { margin: 0 0 0.75em; }
+.editor .ProseMirror h2, .editor .ProseMirror h3 { margin: 0.6em 0 0.3em; }
+
+/* リッチテキスト表示（一覧/詳細） */
+.richtext :is(p, ul, ol, blockquote) { margin: 0 0 0.75em; }
+.richtext ul { list-style: disc; padding-left: 1.4em; }
+.richtext ol { list-style: decimal; padding-left: 1.4em; }
+.richtext a { color: var(--c-brand-ink); text-decoration: underline; }
+
+/* ---- 小物 ---- */
+.page-header { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-6); }
+.page-header h1 { font-size: clamp(1.5rem, 4vw, 2rem); }
+.page-header .spacer { flex: 1; }
+.grid-cards { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.inline { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.danger { color: var(--c-danger); }
+.btn.danger-btn { background: var(--c-danger); }
+.btn.danger-btn:hover { background: #a5281b; }
+.btn.small { padding: 0.45rem 0.9rem; font-size: 0.88rem; }

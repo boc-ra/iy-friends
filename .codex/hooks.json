@@ -1,0 +1,35 @@
+{
+  "description": "Repository context and safety guardrails for IY Friends development.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/session-start.mjs\"",
+            "commandWindows": "powershell -NoProfile -Command \"$repoRoot = git rev-parse --show-toplevel; node (Join-Path $repoRoot '.codex/hooks/session-start.mjs')\"",
+            "timeout": 10,
+            "statusMessage": "Loading IY Friends repository context",
+            "additionalContextLimit": 3000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/pre-tool-use.mjs\"",
+            "commandWindows": "powershell -NoProfile -Command \"$repoRoot = git rev-parse --show-toplevel; node (Join-Path $repoRoot '.codex/hooks/pre-tool-use.mjs')\"",
+            "timeout": 10,
+            "statusMessage": "Checking repository safety policy"
+          }
+        ]
+      }
+    ]
+  }
+}
+

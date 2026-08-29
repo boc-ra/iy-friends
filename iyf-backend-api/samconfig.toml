@@ -1,0 +1,9 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "iyf-backend-api-prod"
+region = "ap-northeast-1"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+parameter_overrides = ["Stage=prod", "AllowedOrigins=https://d2oybetesfen6b.cloudfront.net,http://localhost:5174"]
+confirm_changeset = true

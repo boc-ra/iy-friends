@@ -1,0 +1,28 @@
+[project]
+name = "iyf-backend-api"
+version = "0.1.0"
+description = "IY Friends backend API (modular monolith on AWS Lambda) — Phase 1"
+requires-python = ">=3.13"
+
+# 依存はバージョン固定（SECURITY-10: dependency pinning）。
+# 本番デプロイ時はロックファイル（requirements.txt / hashes）で再現性を担保する。
+dependencies = [
+    "boto3==1.35.99",
+    "pydantic==2.11.7",
+    "email-validator==2.2.0",
+    "bleach==6.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.5",
+    "hypothesis==6.135.1",
+    "moto[dynamodb]==5.0.28",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.setuptools]
+packages = ["src"]

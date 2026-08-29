@@ -1,0 +1,70 @@
+/* デザイントークン — apple-design 原則（余白・タイポグラフィ・素材/奥行き・抑制した動き）。
+   すべて相対単位（rem/em）でDynamic Type的なスケールに耐える。 */
+
+:root {
+  /* カラー（親しみやすさ＋現代的。チームカラーはここで一括変更できる） */
+  --c-bg: #ffffff;
+  --c-surface: #f6f7f9;
+  --c-text: #1c1d21;
+  --c-text-muted: #5c6067;
+  --c-border: rgba(0, 0, 0, 0.08);
+  --c-brand: #e8752b;        /* チームカラー（バスケらしいオレンジ。変更可） */
+  --c-brand-ink: #b8551a;
+  --c-accent: #f4a935;       /* 温かみのあるアクセント */
+  --c-danger: #c0392b;
+
+  /* 半透明チャコール（translucent chrome 用） */
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.5);
+
+  /* スペーシング（8pxベース） */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-6: 1.5rem;
+  --sp-8: 2rem;
+  --sp-12: 3rem;
+  --sp-16: 4rem;
+
+  /* 角丸・影（大きい面ほど厚く） */
+  --radius-sm: 8px;
+  --radius: 14px;
+  --radius-lg: 22px;
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.12);
+
+  /* レイアウト */
+  --content-max: 72rem;
+  --content-narrow: 44rem;
+
+  /* モーション（response ≈ 0.3–0.4s, 抑制） */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 120ms;
+  --dur: 260ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --c-bg: #0f1113;
+    --c-surface: #16191d;
+    --c-text: #f2f3f5;
+    --c-text-muted: #a2a8b2;
+    --c-border: rgba(255, 255, 255, 0.1);
+    --c-brand: #f6903f;
+    --c-brand-ink: #f9b27a;
+    --glass-bg: rgba(20, 22, 26, 0.65);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
+  }
+}
+
+/* 透明度を抑える設定への配慮 */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-bg: var(--c-bg);
+  }
+}

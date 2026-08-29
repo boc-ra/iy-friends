@@ -1,0 +1,256 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  IY Friends shared infrastructure (U5, Phase 1+2) — S3 + CloudFront (static hosting),
+  Cognito (admin/editor auth; Phase 2: explicit token validity, admin MFA enforced via
+  admin-web flow), and minimal monitoring. Backend (Lambda/API/DynamoDB) is owned by the
+  U3 iyf-backend-api stack (imports UserPoolId/UserPoolClientId exports).
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+    AllowedValues: [prod, dev]
+  ApiName:
+    Type: String
+    Default: ""
+    Description: 監視対象の API 名（U3 の API Gateway 名）。空なら API アラームを作らない。
+  BackendFunctionName:
+    Type: String
+    Default: ""
+    Description: 監視対象の Lambda 関数名（U3 backend）。空なら Lambda アラームを作らない。
+  AlarmEmail:
+    Type: String
+    Default: ""
+    Description: アラート通知先メール（空なら SNS 購読なし）。
+
+Conditions:
+  HasApi: !Not [!Equals [!Ref ApiName, ""]]
+  HasFunction: !Not [!Equals [!Ref BackendFunctionName, ""]]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
+
+Resources:
+  # ---- 静的ホスティング用 S3（パブリックブロック・暗号化・OACのみ許可, SECURITY-09/01） ----
+  WebBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "iyf-${Stage}-web-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Enabled }
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # CloudFront(OAC) からの読み取りのみ許可（最小権限, SECURITY-06）。
+          - Sid: AllowCloudFrontOAC
+            Effect: Allow
+            Principal: { Service: cloudfront.amazonaws.com }
+            Action: s3:GetObject
+            Resource: !Sub "${WebBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  # ---- CloudFront Origin Access Control ----
+  OAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "iyf-${Stage}-oac"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ---- セキュリティヘッダ（SECURITY-04） ----
+  SecurityHeadersPolicy:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: !Sub "iyf-${Stage}-security-headers"
+        SecurityHeadersConfig:
+          ContentSecurityPolicy:
+            Override: true
+            ContentSecurityPolicy: "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' https:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+          StrictTransportSecurity:
+            Override: true
+            AccessControlMaxAgeSec: 31536000
+            IncludeSubdomains: true
+          ContentTypeOptions: { Override: true }
+          FrameOptions: { Override: true, FrameOption: DENY }
+          ReferrerPolicy:
+            Override: true
+            ReferrerPolicy: strict-origin-when-cross-origin
+
+  # ---- CloudFront ディストリビューション ----
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub "IY Friends ${Stage} public site"
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: web-s3-origin
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !Ref OAC
+            S3OriginConfig: { OriginAccessIdentity: "" }
+        DefaultCacheBehavior:
+          TargetOriginId: web-s3-origin
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          # AWS 管理ポリシー: CachingOptimized。
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref SecurityHeadersPolicy
+        CustomErrorResponses:
+          # SPA/SSG のディープリンク対応（404 を index に）。
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        ViewerCertificate:
+          # Phase 1 はデフォルトドメイン（*.cloudfront.net）。TLS は CloudFront 既定(>=TLSv1.2)。
+          CloudFrontDefaultCertificate: true
+
+  # ---- Cognito（管理者・編集者認証, SECURITY-12） ----
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "iyf-${Stage}-users"
+      MfaConfiguration: "OPTIONAL"   # Phase2/U5-1=A: editor 任意・admin は admin-web フローで TOTP 必須化。
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      AdminCreateUserConfig: { AllowAdminCreateUserOnly: true }  # 編集者は招待制（SECURITY-08/12）
+      AutoVerifiedAttributes: [email]
+      UsernameAttributes: [email]
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireUppercase: true
+          RequireSymbols: false
+      UserPoolAddOns:
+        AdvancedSecurityMode: ENFORCED   # 漏洩パスワード検知・異常検知（ブルートフォース対策）
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: !Sub "iyf-${Stage}-admin-web"
+      GenerateSecret: false            # SPA(公開クライアント)
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      # Phase 2: トークン有効期限を明示（N3=A）。access/id=1時間・refresh=30日。
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+
+  AdminGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: admin
+      UserPoolId: !Ref UserPool
+      Description: サイト運営責任者（管理者）
+
+  EditorGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: editor
+      UserPoolId: !Ref UserPool
+      Description: コーチ・スタッフ（編集者）
+
+  # ---- 監視（最小, SECURITY-14 / NFR-OPS-03） ----
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "iyf-${Stage}-alarms"
+
+  AlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref AlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasApi
+    Properties:
+      AlarmName: !Sub "iyf-${Stage}-api-5xx"
+      AlarmDescription: API Gateway 5xx エラー増加
+      Namespace: AWS/ApiGateway
+      MetricName: 5xx
+      Dimensions:
+        - { Name: ApiName, Value: !Ref ApiName }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  LambdaErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasFunction
+    Properties:
+      AlarmName: !Sub "iyf-${Stage}-lambda-errors"
+      AlarmDescription: backend Lambda エラー増加
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - { Name: FunctionName, Value: !Ref BackendFunctionName }
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  # CloudFront アクセスログ保持用ロググループ（保持90日, SECURITY-14）。
+  # ※ アプリのログ保持は U3 側で RetentionInDays=90 を設定済み。
+  SharedLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/iyf/${Stage}/shared"
+      RetentionInDays: 90
+
+Outputs:
+  CloudFrontDomain:
+    Description: 公開サイトの CloudFront ドメイン（Phase 1）
+    Value: !GetAtt Distribution.DomainName
+    Export: { Name: !Sub "iyf-${Stage}-CloudFrontDomain" }
+  WebBucketName:
+    Description: フロント資材アップロード先 S3 バケット
+    Value: !Ref WebBucket
+    Export: { Name: !Sub "iyf-${Stage}-WebBucketName" }
+  UserPoolId:
+    Description: Cognito User Pool ID（U3 API オーソライザで参照, Phase 2）
+    Value: !Ref UserPool
+    Export: { Name: !Sub "iyf-${Stage}-UserPoolId" }
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID（管理フロント U2 で使用）
+    Value: !Ref UserPoolClient
+    Export: { Name: !Sub "iyf-${Stage}-UserPoolClientId" }
