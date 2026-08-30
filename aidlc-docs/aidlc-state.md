@@ -3,8 +3,8 @@
 ## Project Information
 - **Project Type**: Greenfield
 - **Start Date**: 2026-07-19T13:36:32Z
-- **Current Stage**: CONSTRUCTION — Development Environment U7 CI/CD Foundation in progress
-- **Current Unit**: U7 CI/CD Foundation
+- **Current Stage**: CONSTRUCTION — Development Environment Foundation complete
+- **Current Unit**: —
 - **Construction Unit Order**: U3 backend-api ✅ → U5 infra (current) → U4 blog-migration → U1 public-web (Phase 1); then U3(admin) → U5(auth) → U2 admin-web (Phase 2)
 
 ## Workspace State
@@ -113,5 +113,5 @@ Scope: US-07(ブログ投稿) / US-09(お知らせ投稿) / US-11(カレンダ�
 - **Scope**: Root Git repository, public GitHub monorepo, CI/CD, repository Codex Skill, Codex Hooks, Git pre-commit hooks
 - **Requirements Questions**: Completed (B/A/A/A/A/A)
 - **Requirements Document**: `aidlc-docs/inception/requirements/development-environment-requirements.md`
-- **Status**: U6 approved; U7 implementation and local validation in progress
+- **Status**: U6 and U7 complete; public GitHub CI, protected main, approved production Environment, AWS OIDC bootstrap, and verification-only role assumption all verified
 - **Execution Plan**: `aidlc-docs/inception/plans/development-environment-execution-plan.md`
