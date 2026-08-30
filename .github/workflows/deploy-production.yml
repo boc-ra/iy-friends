@@ -37,9 +37,9 @@ jobs:
       id-token: write
     steps:
       - name: Check out approved revision
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node.js for target validation
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.18.0"
           package-manager-cache: false
@@ -54,7 +54,7 @@ jobs:
           test -n "$AWS_DEPLOY_ROLE_ARN"
           test -n "$AWS_ACCOUNT_ID"
       - name: Configure short-lived AWS credentials
-        uses: aws-actions/configure-aws-credentials@451ce2a72e8d729a59ebeaacab82dbce58e7af4c # v6
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: iyf-production-${{ github.run_id }}
