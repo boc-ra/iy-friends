@@ -72,8 +72,8 @@ Text alternative: Approved requirements proceed to workflow planning, repository
 ### Construction
 
 - [x] U6 Repository Foundation — functional design and code generation
-- [ ] U7 CI/CD Foundation — infrastructure design and code generation
-- [ ] Build and Test — local validation, staged-file audit, GitHub CI, and OIDC verification
+- [x] U7 CI/CD Foundation — infrastructure design and code generation
+- [x] Build and Test — local validation, staged-file audit, GitHub CI, and OIDC verification
 
 ## Unit U6: Repository Foundation
 
@@ -125,9 +125,9 @@ Text alternative: Approved requirements proceed to workflow planning, repository
 - [x] Add a production concurrency group and fail-fast dependency ordering.
 - [x] Create/authenticate the GitHub repository only after the public-readiness check passes.
 - [x] Configure the GitHub `production` Environment and deployment branch restriction.
-- [ ] Deploy the OIDC bootstrap stack locally through the existing AWS SSO administrator session.
-- [ ] Push the initial commit and inspect the first CI result.
-- [ ] Verify OIDC role assumption from GitHub without deploying application resources.
+- [x] Deploy the OIDC bootstrap stack locally through the existing AWS SSO administrator session.
+- [x] Push the initial commit and inspect the first CI result.
+- [x] Verify OIDC role assumption from GitHub without deploying application resources.
 
 ## Build and Test Plan
 
@@ -143,8 +143,8 @@ Text alternative: Approved requirements proceed to workflow planning, repository
 - [x] Generate an SBOM without retaining it as a long-lived public artifact unless needed.
 - [x] Parse GitHub workflow YAML and review effective workflow permissions.
 - [x] Confirm the initial Git staged set contains no ignored or sensitive files.
-- [ ] Confirm the first GitHub CI run succeeds.
-- [ ] Confirm GitHub OIDC can assume only the intended AWS role from the production environment.
+- [x] Confirm the first GitHub CI run succeeds.
+- [x] Confirm GitHub OIDC can assume only the intended AWS role from the production environment.
 
 ## Security Compliance
 
