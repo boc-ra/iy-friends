@@ -1,0 +1,54 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /iyf-public-web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      npm-public-web:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /iyf-admin-web
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:15"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      npm-admin-web:
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /iyf-backend-api
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:30"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      python-backend:
+        patterns:
+          - "*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:45"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
