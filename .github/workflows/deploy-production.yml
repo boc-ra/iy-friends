@@ -37,9 +37,9 @@ jobs:
       id-token: write
     steps:
       - name: Check out approved revision
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Set up Node.js for target validation
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24.18.0"
           package-manager-cache: false
@@ -81,7 +81,7 @@ jobs:
           ${{ inputs.deploy &&
           (steps.selection.outputs.deploy_infra == 'true' ||
           steps.selection.outputs.deploy_backend == 'true') }}
-        uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
+        uses: aws-actions/setup-sam@341eee193f458fa5aae5d52c94b0c5cf3a1c5a52 # v3
         with:
           version: "1.163.0"
           use-installer: true
